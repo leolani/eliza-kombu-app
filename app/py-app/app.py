@@ -1,19 +1,23 @@
 import json
 import logging.config
 import os
-
 import time
+
+from flask import Flask
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
+from werkzeug.serving import run_simple
+
+from app_service.context.service import ContextService
 from cltl.backend.api.backend import Backend
 from cltl.backend.api.camera import CameraResolution, Camera
 from cltl.backend.api.microphone import Microphone
 from cltl.backend.api.storage import AudioStorage, ImageStorage
 from cltl.backend.api.text_to_speech import TextToSpeech
-from cltl.backend.impl.cached_storage import CachedAudioStorage, CachedImageStorage
-from cltl.backend.impl.image_camera import ImageCamera
+from cltl.backend.impl.cached_storage import CachedAudioStorage
 from cltl.backend.impl.sync_microphone import SynchronizedMicrophone
 from cltl.backend.impl.sync_tts import SynchronizedTextToSpeech, TextOutputTTS
 from cltl.backend.server import BackendServer
-from cltl.backend.source.client_source import ClientAudioSource, ClientImageSource
+from cltl.backend.source.client_source import ClientAudioSource
 from cltl.backend.source.console_source import ConsoleOutput
 from cltl.backend.source.remote_tts import AnimatedRemoteTextOutput
 from cltl.backend.spi.audio import AudioSource
@@ -25,11 +29,14 @@ from cltl.combot.event.bdi import IntentionEvent, Intention
 from cltl.combot.infra.config.k8config import K8LocalConfigurationContainer
 from cltl.combot.infra.di_container import singleton
 from cltl.combot.infra.event import Event
+from cltl.combot.infra.event.kombu import KombuEventBusContainer
 from cltl.combot.infra.event.memory import SynchronousEventBusContainer
 from cltl.combot.infra.event_log import LogWriter
 from cltl.combot.infra.resource.threaded import ThreadedResourceContainer
 from cltl.eliza.api import Eliza
 from cltl.eliza.eliza import ElizaImpl
+from cltl.emissordata.api import EmissorDataStorage
+from cltl.emissordata.file_storage import EmissorDataFileStorage
 from cltl.vad.webrtc_vad import WebRtcVAD
 from cltl_service.asr.service import AsrService
 from cltl_service.backend.backend import BackendService
@@ -38,27 +45,19 @@ from cltl_service.bdi.service import BDIService
 from cltl_service.chatui.service import ChatUiService
 from cltl_service.combot.event_log.service import EventLogService
 from cltl_service.eliza.service import ElizaService
+from cltl_service.emissordata.client import EmissorDataClient
+from cltl_service.emissordata.service import EmissorDataService
 from cltl_service.intentions.init import InitService
 from cltl_service.keyword.service import KeywordService
 from cltl_service.vad.service import VadService
-from emissor.representation.util import serializer as emissor_serializer
-from flask import Flask
-from werkzeug.middleware.dispatcher import DispatcherMiddleware
-from werkzeug.serving import run_simple
-
-from app_service.context.service import ContextService
-
-from cltl.emissordata.api import EmissorDataStorage
-from cltl.emissordata.file_storage import EmissorDataFileStorage
-from cltl_service.emissordata.client import EmissorDataClient
-from cltl_service.emissordata.service import EmissorDataService
+from emissor.representation.util import serializer as emissor_serializer, object_hook as emissor_object_hook
 
 logging.config.fileConfig(os.environ.get('CLTL_LOGGING_CONFIG', default='config/logging.config'),
                           disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
 
 
-class InfraContainer(SynchronousEventBusContainer, K8LocalConfigurationContainer, ThreadedResourceContainer):
+class InfraContainer(KombuEventBusContainer, SynchronousEventBusContainer, K8LocalConfigurationContainer, ThreadedResourceContainer):
     def start(self):
         pass
 
@@ -372,6 +371,11 @@ class ApplicationContainer(ElizaContainer, ElizaComponentsContainer,
                            EmissorStorageContainer, BackendContainer):
     @property
     @singleton
+    def event_bus_serializer(self):
+        return serializer, emissor_object_hook
+
+    @property
+    @singleton
     def log_writer(self):
         config = self.config_manager.get_config("cltl.event_log")
 
@@ -392,7 +396,12 @@ class ApplicationContainer(ElizaContainer, ElizaComponentsContainer,
             logger.info("Stop EventLog")
             self.event_log_service.stop()
         finally:
-            super().stop()
+            try:
+                logger.info("Stop EventBus")
+                if hasattr(self.event_bus, 'close'):
+                    self.event_bus.close()
+            finally:
+                super().stop()
 
 
 def serializer(obj):
