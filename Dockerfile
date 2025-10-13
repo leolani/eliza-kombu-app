@@ -47,5 +47,7 @@ FROM base as app
 
 COPY --from=build /app/app /app/app/
 
+ENV PYTHONPATH="/app/app/src:${PYTHONPATH}"
+
 WORKDIR /app/app/py-app
 CMD ["/bin/bash", "-c", "source /app/app/venv/bin/activate && python app.py"]
