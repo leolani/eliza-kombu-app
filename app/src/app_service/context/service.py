@@ -1,21 +1,17 @@
 import logging
-import uuid
-from datetime import datetime
 
-import requests
-from cltl.combot.event.emissor import LeolaniContext, Agent, ScenarioStarted, ScenarioStopped, ScenarioEvent
+from cltl.combot.event.emissor import ScenarioStopped, Agent
 from cltl.combot.infra.config import ConfigurationManager
 from cltl.combot.infra.event import Event, EventBus
+from cltl.combot.infra.event.util import extract_scenario_id
 from cltl.combot.infra.resource import ResourceManager
 from cltl.combot.infra.time_util import timestamp_now
 from cltl.combot.infra.topic_worker import TopicWorker
-from emissor.representation.scenario import Modality, Scenario
+from emissor.representation.scenario import Scenario
 
 logger = logging.getLogger(__name__)
 
-
 AGENT = Agent("Leolani", "http://cltl.nl/leolani/world/leolani")
-SPEAKER = Agent("Human", "http://cltl.nl/leolani/world/human_speaker")
 
 
 class ContextService:
@@ -41,15 +37,14 @@ class ContextService:
         self._topic_worker = None
 
         self.AGENT = AGENT
-        self._scenario = None
 
     @property
     def app(self):
         return None
 
     def start(self, timeout=30):
-        self._topic_worker = TopicWorker([self._intention_topic, self._desire_topic],
-                                         self._event_bus, provides=[self._intention_topic],
+        self._topic_worker = TopicWorker([self._desire_topic],
+                                         self._event_bus,
                                          buffer_size=32, processor=self._process,
                                          resource_manager=self._resource_manager,
                                          name=self.__class__.__name__)
@@ -64,70 +59,20 @@ class ContextService:
         self._topic_worker = None
 
     def _process(self, event: Event):
-        if event.metadata.topic == self._intention_topic:
-            intentions = {intention.label for intention in event.payload.intentions}
-            if "init" in intentions:
-                self._start_scenario()
-            if "terminate" in intentions:
-                self._stop_scenario()
-        elif event.metadata.topic == self._desire_topic:
+        if event.metadata.topic == self._desire_topic:
             achieved = event.payload.achieved
             if "quit" in achieved:
-                self._stop_scenario()
+                self._stop_scenario(event)
         else:
             logger.warning("Unhandled event: %s", event)
 
-    def _start_scenario(self):
-        scenario, capsule = self._create_scenario()
-        self._event_bus.publish(self._scenario_topic, Event.for_payload(ScenarioStarted.create(scenario)))
-        self._scenario = scenario
-        logger.info("Started scenario %s", scenario)
+    def _stop_scenario(self, event: Event):
+        scenario_id = extract_scenario_id(event)
+        if not scenario_id:
+            logger.warning("No scenario_id found in event, cannot stop scenario")
+            return
 
-    def _update_scenario_speaker(self, event):
-        # TODO multiple mentions
-        mention = event.payload.mentions[0]
-        name_annotation = next(iter(filter(lambda a: a.type == "Entity", mention.annotations)))
-
-        speaker_name = name_annotation.value.text
-        self._scenario.context.speaker = Agent(speaker_name, str(f"http://cltl.nl/leolani/friends/{speaker_name}"))
-
-        self._event_bus.publish(self._scenario_topic, Event.for_payload(ScenarioEvent.create(self._scenario)))
-        logger.info("Updated scenario %s", self._scenario)
-
-    def _stop_scenario(self):
-        self._scenario.ruler.end = timestamp_now()
+        scenario = Scenario.new_instance(scenario_id, 0, timestamp_now(), None, {})
         self._event_bus.publish(self._scenario_topic,
-                                Event.for_payload(ScenarioStopped.create(self._scenario)))
-        logger.info("Stopped scenario %s", self._scenario)
-
-    def _create_scenario(self):
-        signals = {
-            Modality.IMAGE.name.lower(): "./image.json",
-            Modality.TEXT.name.lower(): "./text.json",
-            Modality.AUDIO.name.lower(): "./audio.json"
-        }
-
-        scenario_start = timestamp_now()
-        location = self._get_location()
-
-        scenario_context = LeolaniContext(AGENT, SPEAKER, str(uuid.uuid4()), location, [], [])
-        scenario = Scenario.new_instance(str(uuid.uuid4()), scenario_start, None, scenario_context, signals)
-
-        capsule = {
-            "type": "context",
-            "context_id": scenario.id,
-            "date": datetime.utcfromtimestamp(scenario_start//1000).strftime('%Y-%m-%d'),
-            "place": None,
-            "place_id": None,
-            "country": location["country"],
-            "region": location["region"],
-            "city": location["city"]
-        }
-
-        return scenario, capsule
-
-    def _get_location(self):
-        try:
-            return requests.get("https://ipinfo.io").json()
-        except:
-            return {"country": "", "region": "", "city": ""}
+                                Event.for_payload(ScenarioStopped.create(scenario)))
+        logger.info("Stopped scenario %s", scenario_id)
