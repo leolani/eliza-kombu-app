@@ -15,15 +15,15 @@ services:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmqctl", "status"]
-      interval: 30s
+      interval: 10s
       timeout: 10s
-      retries: 3
+      retries: 6
     networks:
       - eliza-network
 
   eliza-app:
     build:
-      context: ./app
+      context: .
       dockerfile: Dockerfile
     container_name: eliza-app
     ports:
