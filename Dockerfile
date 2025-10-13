@@ -16,14 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gfortran \
         libblas-dev \
         liblapack-dev \
-        libatlas-base-dev \
+        libopenblas-dev \
         libasound-dev \
         libportaudio2 \
         libportaudiocpp0 \
         portaudio19-dev \
         ffmpeg \
         libsm6 \
-        libxext6
+        libxext6 \
     && apt-get clean
 
 
@@ -47,5 +47,5 @@ FROM base as app
 
 COPY --from=build /app/app /app/app/
 
-WORKDIR /app/app//py-app
-CMD source /app/app/venv/bin/activate && python app.py
+WORKDIR /app/app/py-app
+CMD ["/bin/bash", "-c", "source /app/app/venv/bin/activate && python app.py"]
