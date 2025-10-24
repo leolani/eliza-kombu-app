@@ -1,8 +1,9 @@
 import json
 import logging.config
 import os
-import time
+import uuid
 
+import time
 from flask import Flask
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from werkzeug.serving import run_simple
@@ -421,7 +422,8 @@ def main():
 
     with application as started_app:
         intention_topic = started_app.config_manager.get_config("cltl.bdi").get("topic_intention")
-        started_app.event_bus.publish(intention_topic, Event.for_payload(IntentionEvent([Intention("init", None)])))
+        init_event = Event.for_payload(IntentionEvent([Intention("init", None)]), scenario_id=str(uuid.uuid4()))
+        started_app.event_bus.publish(intention_topic, init_event)
 
         routes = {
             '/storage': started_app.storage_service.app,
