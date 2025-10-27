@@ -1,7 +1,6 @@
 import json
 import logging.config
 import os
-import uuid
 
 import time
 from flask import Flask
@@ -273,23 +272,16 @@ class ASRContainer(EmissorStorageContainer, InfraContainer):
         super().stop()
 
 
-class ElizaComponentsContainer(EmissorStorageContainer, InfraContainer):
+class ElizaComponentsContainer(InfraContainer):
     @property
     @singleton
     def keyword_service(self) -> KeywordService:
-        return KeywordService.from_config(self.emissor_data_client,
-                                          self.event_bus, self.resource_manager, self.config_manager)
+        return KeywordService.from_config(self.event_bus, self.resource_manager, self.config_manager)
 
     @property
     @singleton
     def context_service(self) -> ContextService:
         return ContextService.from_config(self.event_bus, self.resource_manager, self.config_manager)
-
-    @property
-    @singleton
-    def keyword_service(self) -> KeywordService:
-        return KeywordService.from_config(self.emissor_data_client,
-                                          self.event_bus, self.resource_manager, self.config_manager)
 
     @property
     @singleton
@@ -301,8 +293,7 @@ class ElizaComponentsContainer(EmissorStorageContainer, InfraContainer):
     @property
     @singleton
     def init_intention(self) -> InitService:
-        return InitService.from_config(self.emissor_data_client,
-                                       self.event_bus, self.resource_manager, self.config_manager)
+        return InitService.from_config(self.event_bus, self.resource_manager, self.config_manager)
 
     def start(self):
         logger.info("Start Eliza services")
@@ -343,7 +334,7 @@ class ChatUIContainer(InfraContainer):
         super().stop()
 
 
-class ElizaContainer(EmissorStorageContainer, InfraContainer):
+class ElizaContainer(InfraContainer):
     @property
     @singleton
     def eliza(self) -> Eliza:
@@ -352,8 +343,7 @@ class ElizaContainer(EmissorStorageContainer, InfraContainer):
     @property
     @singleton
     def eliza_service(self) -> ElizaService:
-        return ElizaService.from_config(self.eliza, self.emissor_data_client,
-                                        self.event_bus, self.resource_manager, self.config_manager)
+        return ElizaService.from_config(self.eliza, self.event_bus, self.resource_manager, self.config_manager)
 
     def start(self):
         logger.info("Start Eliza")
@@ -422,7 +412,7 @@ def main():
 
     with application as started_app:
         intention_topic = started_app.config_manager.get_config("cltl.bdi").get("topic_intention")
-        init_event = Event.for_payload(IntentionEvent([Intention("init", None)]), scenario_id=str(uuid.uuid4()))
+        init_event = Event.for_payload(IntentionEvent([Intention("init", None)]))
         started_app.event_bus.publish(intention_topic, init_event)
 
         routes = {

@@ -3,11 +3,9 @@ import uuid
 from datetime import datetime
 
 import requests
-
 from cltl.combot.event.emissor import LeolaniContext, Agent, ScenarioStarted, ScenarioStopped, ScenarioEvent
 from cltl.combot.infra.config import ConfigurationManager
 from cltl.combot.infra.event import Event, EventBus
-from cltl.combot.infra.event.util import extract_scenario_id
 from cltl.combot.infra.resource import ResourceManager
 from cltl.combot.infra.time_util import timestamp_now
 from cltl.combot.infra.topic_worker import TopicWorker
@@ -43,7 +41,7 @@ class ContextService:
         self._topic_worker = None
 
         self.AGENT = AGENT
-        self._scenarios = dict()
+        self._scenario = None
 
     @property
     def app(self):
@@ -66,51 +64,34 @@ class ContextService:
         self._topic_worker = None
 
     def _process(self, event: Event):
-        scenario_id = event.metadata.scenario_id
-        if not scenario_id:
-            return
+        if not event.metadata.tenant:
+            logger.warning("The ContextService should only run in a tenant context!")
 
         if event.metadata.topic == self._intention_topic:
             intentions = {intention.label for intention in event.payload.intentions}
             if "init" in intentions:
-                self._start_scenario(scenario_id)
+                self._start_scenario(event)
             if "terminate" in intentions:
-                self._stop_scenario(scenario_id)
+                self._stop_scenario(event)
         elif event.metadata.topic == self._desire_topic:
             achieved = event.payload.achieved
             if "quit" in achieved:
-                self._stop_scenario(scenario_id)
+                self._stop_scenario(event)
         else:
             logger.warning("Unhandled event: %s", event)
 
-    def _start_scenario(self, scenario_id):
-        scenario, capsule = self._create_scenario(scenario_id)
-        self._event_bus.publish(self._scenario_topic, Event.for_payload(ScenarioStarted.create(scenario),
-                                                                        scenario_id=scenario_id))
-        self._scenarios[scenario_id] = scenario
+    def _start_scenario(self, source_event):
+        scenario, capsule = self._create_scenario()
+        self._event_bus.publish(self._scenario_topic, Event.for_payload(ScenarioStarted.create(scenario), source_event))
+        self._scenario = scenario
         logger.info("Started scenario %s", scenario)
 
-    def _update_scenario_speaker(self, event):
-        scenario_id = extract_scenario_id(event)
-        # TODO multiple mentions
-        mention = event.payload.mentions[0]
-        name_annotation = next(iter(filter(lambda a: a.type == "Entity", mention.annotations)))
+    def _stop_scenario(self, source_event):
+        self._scenario.ruler.end = timestamp_now()
+        self._event_bus.publish(self._scenario_topic, Event.for_payload(ScenarioStopped.create(self._scenario), source_event))
+        logger.info("Stopped scenario %s", self._scenario)
 
-        speaker_name = name_annotation.value.text
-        scenario = self._scenarios[scenario_id]
-        scenario.context.speaker = Agent(speaker_name, str(f"http://cltl.nl/leolani/friends/{speaker_name}"))
-
-        self._event_bus.publish(self._scenario_topic, Event.for_payload(ScenarioEvent.create(scenario)))
-        logger.info("Updated scenario %s", scenario)
-
-    def _stop_scenario(self, scenario_id):
-        scenario = self._scenarios[scenario_id]
-        scenario.ruler.end = timestamp_now()
-        self._event_bus.publish(self._scenario_topic,
-                                Event.for_payload(ScenarioStopped.create(scenario), scenario_id=scenario_id))
-        logger.info("Stopped scenario %s", scenario)
-
-    def _create_scenario(self, scenario_id):
+    def _create_scenario(self):
         signals = {
             Modality.IMAGE.name.lower(): "./image.json",
             Modality.TEXT.name.lower(): "./text.json",
@@ -121,7 +102,7 @@ class ContextService:
         location = self._get_location()
 
         scenario_context = LeolaniContext(AGENT, SPEAKER, str(uuid.uuid4()), location, [], [])
-        scenario = Scenario.new_instance(scenario_id, scenario_start, None, scenario_context, signals)
+        scenario = Scenario.new_instance(str(uuid.uuid4()), scenario_start, None, scenario_context, signals)
 
         capsule = {
             "type": "context",
