@@ -82,13 +82,15 @@ class ContextService:
 
     def _start_scenario(self, source_event):
         scenario, capsule = self._create_scenario()
-        self._event_bus.publish(self._scenario_topic, Event.for_payload(ScenarioStarted.create(scenario), source_event))
+        scenario_start_event = Event.for_scenario_payload(scenario.id, ScenarioStarted.create(scenario), source=source_event)
+        self._event_bus.publish(self._scenario_topic, scenario_start_event)
         self._scenario = scenario
         logger.info("Started scenario %s", scenario)
 
     def _stop_scenario(self, source_event):
         self._scenario.ruler.end = timestamp_now()
-        self._event_bus.publish(self._scenario_topic, Event.for_payload(ScenarioStopped.create(self._scenario), source_event))
+        scenario_stop_event = Event.for_scenario_payload("", ScenarioStopped.create(self._scenario), source=source_event)
+        self._event_bus.publish(self._scenario_topic, scenario_stop_event)
         logger.info("Stopped scenario %s", self._scenario)
 
     def _create_scenario(self):
